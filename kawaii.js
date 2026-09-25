@@ -1,125 +1,164 @@
-import { absoluteUrl, SourceUrlError } from "@riwaq/extension-api";
+import { absoluteUrl, SourceUrlError, Source } from "@riwaq/extension-api";
 
-export const BASE_URL = "https://kawaiimanga.org";
+const BASE_URL = "https://kawaiimanga.org";
 
-// ── معلومات المصدر ──────────────────────────────────────────
-export const source = {
-  id: 1001,
-  name: "Kawaii Manga",
-  lang: "ar",
-  baseUrl: BASE_URL,
-
-  // ── قائمة المانجا الشعبية ──────────────────────────────
-  async getPopularManga(page = 1) {
-    const url = `${BASE_URL}/manga/?page=${page}&order=popular`;
-    const doc = await this.fetchDocument(url);
-    return parseMangaList(doc, BASE_URL);
-  },
-
-  // ── قائمة المانجا الأحدث ──────────────────────────────
-  async getLatestUpdates(page = 1) {
-    const url = `${BASE_URL}/manga/?page=${page}&order=update`;
-    const doc = await this.fetchDocument(url);
-    return parseMangaList(doc, BASE_URL);
-  },
-
-  // ── البحث ─────────────────────────────────────────────
-  async searchManga(query, page = 1) {
-    const url = `${BASE_URL}/?s=${encodeURIComponent(query)}&page=${page}`;
-    const doc = await this.fetchDocument(url);
-    return parseMangaList(doc, BASE_URL);
-  },
-
-  // ── تفاصيل المانجا ────────────────────────────────────
-  async getMangaDetails(mangaUrl) {
-    const doc = await this.fetchDocument(mangaUrl);
-
-    const title =
-      doc.querySelector(".post-title h1, .manga-title")?.textContent?.trim() ?? "";
-    const cover =
-      doc.querySelector(".summary_image img")?.getAttribute("src") ?? "";
-    const description =
-      doc.querySelector(".summary__content p, .description-summary p")?.textContent?.trim() ?? "";
-    const status =
-      doc.querySelector(".post-status .summary-content")?.textContent?.trim() ?? "";
-    const genres = Array.from(
-      doc.querySelectorAll(".genres-content a")
-    ).map((a) => a.textContent.trim());
-
-    return { title, cover: absoluteUrl(cover, BASE_URL), description, status, genres };
-  },
-
-  // ── قائمة الفصول ──────────────────────────────────────
-  async getChapterList(mangaUrl) {
-    const doc = await this.fetchDocument(mangaUrl);
-    const items = doc.querySelectorAll(".wp-manga-chapter, .chapter-li");
-    const chapters = [];
-
-    for (const item of items) {
-      const a = item.querySelector("a");
-      if (!a) continue;
-      chapters.push({
-        name: a.textContent.trim(),
-        url: a.href,
-        date: item.querySelector(".chapter-release-date")?.textContent?.trim() ?? "",
-      });
-    }
-    return chapters;
-  },
-
-  // ── صفحات الفصل ───────────────────────────────────────
-  async getPageList(chapterUrl) {
-    const doc = await this.fetchDocument(chapterUrl);
-    return parseChapterLines(doc, chapterUrl);
-  },
-};
-
-// ── دوال مساعدة ─────────────────────────────────────────────
-
-function parseMangaList(doc, baseUrl) {
-  const items = doc.querySelectorAll(".manga-item, .c-tabs-item__content, .page-item-detail");
-  const list = [];
-
-  for (const item of items) {
-    const a = item.querySelector("a");
-    const img = item.querySelector("img");
-    if (!a) continue;
-
-    list.push({
-      title: a.getAttribute("title") ?? a.textContent.trim(),
-      url: a.href,
-      cover: absoluteUrl(
-        img?.getAttribute("data-src") ?? img?.getAttribute("src") ?? "",
-        baseUrl
-      ),
-    });
-  }
-  return list;
-}
-
-export function slugFromUrl(url) {
-  const m = new URL(url).pathname.match(/^\/(?:manga|series|read)\/([^/]+)/);
-  if (!m) throw new SourceUrlError(`kawaii: ${url} غير صالح`);
+// دالة لتحليل معرف السلسلة من الرابط
+function slugFromUrl(url) {
+  const m = new URL(url).pathname.match(/^\/(?:manga|series)\/([^/]+)/);
+  if (!m) throw new SourceUrlError(`kawaii: ${url} غير صالح لسلسلة`);
   return decodeURIComponent(m[1]);
 }
 
-export function parseChapterLines(doc, chapterUrl) {
-  const root = doc.querySelector(
-    ".reading-content, .page-break, .rd-manga, .vng-manga, #chapter_images"
-  );
-  if (!root) throw new Error(`تعذر العثور على حاوية الصور في ${chapterUrl}`);
+// دالة لتحليل معرف الفصل من الرابط
+function chapterSlugFromUrl(url) {
+  const m = new URL(url).pathname.match(/^\/(?:manga|series)\/[^/]+\/read\/([^/]+)/);
+  if (!m) throw new SourceUrlError(`kawaii: ${url} غير صالح لفصل`);
+  return decodeURIComponent(m[1]);
+}
 
-  const lines = [];
-  for (const img of root.querySelectorAll("img")) {
-    const src =
-      img.getAttribute("data-src") ??
-      img.getAttribute("src") ??
-      img.getAttribute("data-lazy-src");
-    if (src) lines.push({ type: "image", content: absoluteUrl(src.trim(), BASE_URL) });
+// دالة لجلب تفاصيل السلسلة (قد تحتاج لتعديلها إذا كان الموقع يستخدم API خاص)
+// هنا نفترض أننا نستخرج المعلومات من HTML أو نستخدم رابط مباشر إذا وجد
+async function fetchMangaInfo(url) {
+  const response = await fetch(url);
+  const html = await response.text();
+  
+  // ملاحظة: بما أن الموقع Next.js، المحتوى قد يكون في HTML مباشرة أو يحتاج لاستخراج عبر Regex
+  // هذا مثال بسيط لاستخراج العناوين إذا كانت موجودة في الـ HTML
+  // قد تحتاج لتعديل هذا الجزء بناءً على عناصر الـ DOM الفعلية في kawaiimanga.org
+  
+  // مثال: استخراج العنوان من meta tag
+  const titleMatch = html.match(/<meta property="og:title" content="([^"]+)"/);
+  const title = titleMatch ? titleMatch[1] : "غير معروف";
+  
+  const artistMatch = html.match(/<meta name="author" content="([^"]+)"/); // أو أي meta آخر
+  const artist = artistMatch ? artistMatch[1] : "";
+  
+  const descMatch = html.match(/<meta name="description" content="([^"]+)"/);
+  const description = descMatch ? descMatch[1] : "";
+
+  return {
+    title,
+    artist,
+    description,
+    // قد تحتاج لإضافة fields أخرى مثل genres, status إذا كانت متوفرة
+  };
+}
+
+// دالة لتحليل الفصول من صفحة السلسلة
+function parseChaptersFromList(doc, baseUrl) {
+  const chapters = [];
+  // افتراض أن الروابط للفصول تحتوي على /read/ أو /chapter/
+  // تحتاج لتعديل الـ selector بناءً على هيكل الصفحة الفعلي في kawaiimanga.org
+  const links = Array.from(doc.querySelectorAll("a[href*='/read/'], a[href*='/chapter/']"));
+  
+  for (const link of links) {
+    const href = link.getAttribute("href");
+    const chapterTitle = link.textContent.trim();
+    const chapterUrl = absoluteUrl(href, baseUrl);
+    
+    // استخراج رقم الفصل من الرابط إذا أمكن، وإلا نستخدم العنوان
+    let chapterNumber = chapterTitle.match(/(\d+)/)?.[1];
+    
+    chapters.push({
+      id: chapterUrl, // نستخدم الرابط كمعرف فريد
+      title: chapterTitle,
+      url: chapterUrl,
+      number: chapterNumber || undefined
+    });
+  }
+  return chapters;
+}
+
+// دالة تحليل الصور داخل الفصل (نفس الكود السابق مع تحسين بسيط)
+function parseChapterContent(doc, chapterUrl) {
+  const root = doc.querySelector(".reading-content, .page-break, .rd-manga, .vng-manga, #chapter_images");
+  if (!root) {
+    throw new Error(`تعذر العثور على حاوية الصور في ${chapterUrl}`);
   }
 
-  if (lines.length === 0)
+  const lines = [];
+  const images = Array.from(root.querySelectorAll("img"));
+  
+  for (const img of images) {
+    const src = img.getAttribute("data-src") || img.getAttribute("src") || img.getAttribute("data-lazy-src");
+    if (src) {
+      lines.push({
+        type: "image",
+        content: absoluteUrl(src.trim(), BASE_URL)
+      });
+    }
+  }
+
+  if (lines.length === 0) {
     throw new Error(`لم يتم العثور على أي صور داخل الفصل في ${chapterUrl}`);
+  }
 
   return lines;
 }
+
+// تعريف المصدر الرئيسي
+const source = new Source({
+  name: "Kawaii Manga",
+  lang: "ar",
+  id: "kawaiimanga",
+  version: 1,
+  
+  // دالة البحث عن السلاسل (تحتاج لتعديلها حسب هيكل صفحة البحث في الموقع)
+  async search(query) {
+    const url = `${BASE_URL}/search?q=${encodeURIComponent(query)}`;
+    const response = await fetch(url);
+    const html = await response.text();
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    
+    // هنا تحتاج لتحديد selector للعناصر التي تمثل نتائج البحث
+    // مثال: const items = Array.from(doc.querySelectorAll(".manga-card a"));
+    // سأضع كود افتراضي:
+    const items = Array.from(doc.querySelectorAll("a[href^='/manga/']"));
+    
+    const mangaList = [];
+    for (const item of items) {
+      const href = item.getAttribute("href");
+      const title = item.querySelector("h2, h3, .title")?.textContent?.trim() || "مجهول";
+      const cover = item.querySelector("img")?.getAttribute("src") || "";
+      
+      mangaList.push({
+        id: href,
+        title,
+        cover: absoluteUrl(cover, BASE_URL),
+        url: absoluteUrl(href, BASE_URL),
+        artist: "",
+        description: ""
+      });
+    }
+    
+    return mangaList;
+  },
+
+  // دالة جلب تفاصيل السلسلة وقائمة الفصول
+  async fetchManga(url) {
+    const response = await fetch(url);
+    const html = await response.text();
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    
+    const info = await fetchMangaInfo(url);
+    const chapters = parseChaptersFromList(doc, BASE_URL);
+    
+    return {
+      ...info,
+      chapters,
+      url
+    };
+  },
+
+  // دالة جلب محتوى الفصل
+  async fetchChapter(url) {
+    const response = await fetch(url);
+    const html = await response.text();
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    
+    const lines = parseChapterContent(doc, url);
+    return lines;
+  }
+});
+
+export default source;
