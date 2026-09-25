@@ -70,3 +70,105 @@ function getChaptersFromHtml(doc, baseUrl) {
 }
 
 // دالة تحليل صور الفصل
+function parseImagesFromHtml(doc) {
+  const images = [];
+  // محاولة العثور على الحاوية الصحيحة
+  const container = doc.querySelector(".reading-content, #chapter_images, .page-break, .rd-manga, .vng-manga");
+  
+  if (!container) {
+    // إذا لم نجد الحاوية، نبحث عن جميع الصور في الصفحة كحل بديل
+    const allImgs = doc.querySelectorAll("img");
+    for (const img of allImgs) {
+      const src = img.getAttribute("src") || img.getAttribute("data-src") || img.getAttribute("data-lazy-src");
+      if (src) {
+        images.push({
+          type: "image",
+          content: absoluteUrl(src.trim(), BASE_URL)
+        });
+      }
+    }
+  } else {
+    const imgs = container.querySelectorAll("img");
+    for (const img of imgs) {
+      const src = img.getAttribute("src") || img.getAttribute("data-src") || img.getAttribute("data-lazy-src");
+      if (src) {
+        images.push({
+          type: "image",
+          content: absoluteUrl(src.trim(), BASE_URL)
+        });
+      }
+    }
+  }
+
+  if (images.length === 0) {
+    throw new Error(`Riwaq: No images found in chapter.`);
+  }
+
+  return images;
+}
+
+// تعريف المصدر الرئيسي
+const source = new Source({
+  name: "Kawaii Manga",
+  lang: "ar",
+  id: "kawaiimanga",
+  version: 1,
+
+  // البحث عن سلاسل
+  async search(query) {
+    // ملاحظة: يجب تعديل هذا الجزء بناءً على رابط بحث الموقع الفعلي
+    // غالباً ما يكون: https://kawaiimanga.org/search?q=QUERY
+    const url = `${BASE_URL}/search?q=${encodeURIComponent(query)}`;
+    const response = await fetch(url);
+    const html = await response.text();
+    const doc = new DOMParser().parseFromString(html, "text/html");
+
+    const results = [];
+    // تعديل selector حسب هيكل صفحة البحث في الموقع
+    const items = Array.from(doc.querySelectorAll("a[href^='/manga/'], a[href^='/series/']"));
+    
+    for (const item of items) {
+      const href = item.getAttribute("href");
+      const title = item.querySelector("h2, h3, .title, .name")?.textContent?.trim() || "Unknown";
+      const img = item.querySelector("img")?.getAttribute("src");
+      
+      results.push({
+        id: href,
+        title,
+        cover: img ? absoluteUrl(img, BASE_URL) : "",
+        url: absoluteUrl(href, BASE_URL),
+        artist: "",
+        description: ""
+      });
+    }
+    return results;
+  },
+
+  // جلب تفاصيل السلسلة
+  async fetchManga(url) {
+    const info = await getMangaInfoFromHtml(url);
+    const response = await fetch(url);
+    const html = await response.text();
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    
+    const chapters = getChaptersFromHtml(doc, BASE_URL);
+    
+    return {
+      ...info,
+      chapters,
+      url
+    };
+  },
+
+  // جلب محتوى الفصل
+  async fetchChapter(url) {
+    const response = await fetch(url);
+    const html = await response.text();
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    
+    const images = parseImagesFromHtml(doc);
+    return images;
+  }
+});
+
+export default source;
